@@ -34,6 +34,12 @@ Eine native Home Assistant Custom Integration zur Steuerung und Telemetrie-Auswe
 
 ## 📦 Installation via HACS
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Limo123123&repository=ha-tomons-charger&category=integration)
+
+### 1-Klick Installation:
+Klicke einfach auf den blauen Button oben. Dein Home Assistant öffnet sich und fügt dieses Repository automatisch zu HACS hinzu!
+
+### Manuelle Installation:
 1. Öffne **Home Assistant** $\rightarrow$ **HACS** $\rightarrow$ **Integrationen**.
 2. Klicke oben rechts auf das Drei-Punkte-Menü ($\vdots$) und wähle **Benutzerdefinierte Repositories** (*Custom repositories*).
 3. Trage folgende URL ein:
