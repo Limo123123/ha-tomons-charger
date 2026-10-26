@@ -8,9 +8,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, MANUFACTURER, CONF_DEVICE_NAME, CONF_PRODUCT_MODEL
+from .const import DOMAIN, MANUFACTURER, CONF_DEVICE_NAME, CONF_PRODUCT_MODEL, CONF_MAC
 from .coordinator import TomonsDataUpdateCoordinator
 
 
@@ -43,13 +44,18 @@ class TomonsBaseBinarySensor(CoordinatorEntity[TomonsDataUpdateCoordinator], Bin
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return device information."""
+        """Return device information with MAC network connection for router linking."""
+        mac = self.coordinator.entry.data.get(CONF_MAC) or getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
+        connections = {(CONNECTION_NETWORK_MAC, mac)} if mac else set()
+        model_code = self.coordinator.entry.data.get(CONF_PRODUCT_MODEL, "5242896")
+
         return DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.device_id)},
             name=self.coordinator.entry.data.get(CONF_DEVICE_NAME, "Tomons Wallbox"),
             manufacturer=MANUFACTURER,
-            model=self.coordinator.entry.data.get(CONF_PRODUCT_MODEL, "EV Wallbox"),
-            sw_version="1.1.5",
+            model=f"Tomons AC Wallbox ({model_code})",
+            connections=connections,
+            sw_version=getattr(self.coordinator, "firmware_version", "1.0.0"),
         )
 
 

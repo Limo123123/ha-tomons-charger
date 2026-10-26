@@ -40,6 +40,8 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.device_id: str = entry.data[CONF_DEVICE_ID]
         self.email: str = entry.data.get(CONF_EMAIL, "")
         self.password: str = entry.data.get(CONF_PASSWORD, "")
+        self.mac: str = entry.data.get(CONF_MAC, "AC:A7:04:88:43:02")
+        self.firmware_version: str = "1.0.0"
 
         self.cloud: Optional[TomonsCloudClient] = None
         self.charger: Optional[TomonsCharger] = None

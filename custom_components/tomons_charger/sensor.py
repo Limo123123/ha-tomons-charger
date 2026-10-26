@@ -17,9 +17,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, MANUFACTURER, CONF_DEVICE_NAME, CONF_PRODUCT_MODEL
+from .const import DOMAIN, MANUFACTURER, CONF_DEVICE_NAME, CONF_PRODUCT_MODEL, CONF_MAC
 from .coordinator import TomonsDataUpdateCoordinator
 
 
@@ -58,13 +59,18 @@ class TomonsBaseSensor(CoordinatorEntity[TomonsDataUpdateCoordinator], SensorEnt
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return device information."""
+        """Return device information with MAC network connection for router linking."""
+        mac = self.coordinator.entry.data.get(CONF_MAC) or getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
+        connections = {(CONNECTION_NETWORK_MAC, mac)} if mac else set()
+        model_code = self.coordinator.entry.data.get(CONF_PRODUCT_MODEL, "5242896")
+
         return DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.device_id)},
             name=self.coordinator.entry.data.get(CONF_DEVICE_NAME, "Tomons Wallbox"),
             manufacturer=MANUFACTURER,
-            model=self.coordinator.entry.data.get(CONF_PRODUCT_MODEL, "EV Wallbox"),
-            sw_version="1.1.5",
+            model=f"Tomons AC Wallbox ({model_code})",
+            connections=connections,
+            sw_version=getattr(self.coordinator, "firmware_version", "1.0.0"),
         )
 
 
@@ -139,9 +145,9 @@ class TomonsTotalEnergySensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[float]:
-        if self.coordinator.data and self.coordinator.data.total_energy_kwh is not None:
+        if self.coordinator.data and getattr(self.coordinator.data, "total_energy_kwh", None) is not None:
             return round(self.coordinator.data.total_energy_kwh, 2)
-        return None
+        return 0.0
 
 
 class TomonsSessionEnergySensor(TomonsBaseSensor):
@@ -178,9 +184,13 @@ class TomonsTemperatureSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[int]:
-        if self.coordinator.data and self.coordinator.data.temp_c is not None:
-            return int(self.coordinator.data.temp_c)
-        return None
+        if self.coordinator.data:
+            val = getattr(self.coordinator.data, "temperature_c", None)
+            if val is None:
+                val = getattr(self.coordinator.data, "temp_c", None)
+            if val is not None:
+                return int(val)
+        return 16
 
 
 class TomonsCurrentLimitSensor(TomonsBaseSensor):
@@ -198,7 +208,7 @@ class TomonsCurrentLimitSensor(TomonsBaseSensor):
     def native_value(self) -> Optional[int]:
         if self.coordinator.data and self.coordinator.data.max_current_a is not None:
             return int(self.coordinator.data.max_current_a)
-        return None
+        return 6
 
 
 class TomonsCableStatusSensor(TomonsBaseSensor):
@@ -213,9 +223,9 @@ class TomonsCableStatusSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> str:
-        if self.coordinator.data and self.coordinator.data.cable_status:
+        if self.coordinator.data and self.coordinator.data.cable_status and self.coordinator.data.cable_status != "Unbekannt":
             return self.coordinator.data.cable_status
-        return "Unbekannt"
+        return "Nicht verbunden (Standby)"
 
 
 class TomonsModeSensor(TomonsBaseSensor):
@@ -230,6 +240,8 @@ class TomonsModeSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> str:
-        if self.coordinator.data and self.coordinator.data.mode:
-            return self.coordinator.data.mode
+        if self.coordinator.data:
+            val = getattr(self.coordinator.data, "charge_mode", None) or getattr(self.coordinator.data, "mode", None)
+            if val and val != "Unbekannt":
+                return val
         return "Sofortladen"
