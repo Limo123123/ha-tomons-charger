@@ -64,9 +64,11 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
     @property
     def native_value(self) -> float:
         """Return currently set charging current limit in Amperes."""
+        if getattr(self.coordinator, "current_limit_a", None) is not None:
+            return float(self.coordinator.current_limit_a)
         if self.coordinator.data and self.coordinator.data.max_current_a is not None:
             return float(self.coordinator.data.max_current_a)
-        return 6.0
+        return 16.0
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new charging current limit."""

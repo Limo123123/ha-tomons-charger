@@ -208,9 +208,11 @@ class TomonsCurrentLimitSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[int]:
+        if getattr(self.coordinator, "current_limit_a", None) is not None:
+            return int(self.coordinator.current_limit_a)
         if self.coordinator.data and self.coordinator.data.max_current_a is not None:
             return int(self.coordinator.data.max_current_a)
-        return 6
+        return 16
 
 
 class TomonsCableStatusSensor(TomonsBaseSensor):

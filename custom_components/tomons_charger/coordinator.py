@@ -43,6 +43,7 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.password: str = entry.data.get(CONF_PASSWORD, "")
         self.mac: str = entry.data.get(CONF_MAC, "AC:A7:04:88:43:02")
         self.firmware_version: Optional[str] = entry.data.get("firmware_version", None)
+        self.current_limit_a: int = 16
 
         self.cloud: Optional[TomonsCloudClient] = None
         self.charger: Optional[TomonsCharger] = None
@@ -140,24 +141,38 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                     self.last_session_energy_kwh,
                 )
 
+        # Preserve configured current limit if telemetry didn't specify one
+        if self.current_limit_a is not None:
+            telemetry.max_current_a = self.current_limit_a
+
         # Thread-safe dispatch to Home Assistant event loop
         self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, telemetry)
 
     async def _async_update_data(self) -> ChargerTelemetry:
         """Periodic heartbeat poll: send 0xCE01 status request to keep telemetry stream alive."""
         if self.charger:
+            if not self.charger.is_connected:
+                _LOGGER.info("Tomons Wallbox: MQTT connection lost, reconnecting...")
+                await self.hass.async_add_executor_job(self.charger.reconnect)
             try:
                 await self.hass.async_add_executor_job(self.charger.request_status)
             except Exception as err:
                 _LOGGER.warning("Could not send status request to Wallbox: %s", err)
-            return self.charger.get_telemetry()
-        return ChargerTelemetry()
+            telemetry = self.charger.get_telemetry()
+            if self.current_limit_a is not None:
+                telemetry.max_current_a = self.current_limit_a
+            return telemetry
+        return ChargerTelemetry(max_current_a=self.current_limit_a)
 
     async def async_set_current_limit(self, amps: int) -> None:
         """Set charging current limit in Amperes (e.g. 6, 8, 10, 16, 32 A)."""
         if not self.charger:
             return
         _LOGGER.info("Setting Wallbox current limit to %d A", amps)
+        self.current_limit_a = amps
+        if not self.charger.is_connected:
+            _LOGGER.info("Tomons Wallbox: MQTT disconnected, reconnecting before command...")
+            await self.hass.async_add_executor_job(self.charger.reconnect)
         await self.hass.async_add_executor_job(self.charger.set_charging_current, amps)
         if self.data:
             self.data.max_current_a = amps

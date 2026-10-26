@@ -4,6 +4,11 @@
 [![GitHub release](https://img.shields.io/github/v/release/Limo123123/ha-tomons-charger?include_prereleases)](https://github.com/Limo123123/ha-tomons-charger/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
+> [!WARNING]
+> ### ⚠️ BETA-STATUS / COMMUNITY REVERSE ENGINEERING
+> Diese Integration befindet sich im **aktiven Beta-Stadium**.
+> Die Protokolle, Entschlüsselungsmechanismen und Steuerbefehle wurden per Reverse-Engineering der Tomons / Inateck App und des Licheng-Tech MQTT-Brokers analysiert und nachgebildet. Einzelne Wallbox-Hardware- und Firmware-Revisionen können sich unterschiedlich verhalten. Feedback, Log-Ausgaben und Pull Requests sind herzlich willkommen!
+
 Eine native Home Assistant Custom Integration zur Steuerung und Telemetrie-Auswertung von **Tomons / Inateck Wallboxen (EV Chargers)** über das Cloud-MQTT- und REST-Protokoll von Shenzhen Licheng Technology.
 
 ---
