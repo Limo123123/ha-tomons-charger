@@ -55,7 +55,7 @@ class TomonsBaseBinarySensor(CoordinatorEntity[TomonsDataUpdateCoordinator], Bin
             manufacturer=MANUFACTURER,
             model=f"Tomons AC Wallbox ({model_code})",
             connections=connections,
-            sw_version=getattr(self.coordinator, "firmware_version", "1.0.0"),
+            sw_version=getattr(self.coordinator, "firmware_version", None),
         )
 
 

@@ -12,6 +12,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfEnergy,
     UnitOfTemperature,
+    EntityCategory,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -42,6 +43,7 @@ async def async_setup_entry(
         TomonsCurrentLimitSensor(coordinator),
         TomonsCableStatusSensor(coordinator),
         TomonsModeSensor(coordinator),
+        TomonsMacAddressSensor(coordinator),
     ]
 
     async_add_entities(entities)
@@ -70,7 +72,7 @@ class TomonsBaseSensor(CoordinatorEntity[TomonsDataUpdateCoordinator], SensorEnt
             manufacturer=MANUFACTURER,
             model=f"Tomons AC Wallbox ({model_code})",
             connections=connections,
-            sw_version=getattr(self.coordinator, "firmware_version", "1.0.0"),
+            sw_version=getattr(self.coordinator, "firmware_version", None),
         )
 
 
@@ -245,3 +247,20 @@ class TomonsModeSensor(TomonsBaseSensor):
             if val and val != "Unbekannt":
                 return val
         return "Sofortladen"
+
+
+class TomonsMacAddressSensor(TomonsBaseSensor):
+    """MAC Address diagnostic sensor."""
+
+    _attr_icon = "mdi:network"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "mac_address"
+
+    def __init__(self, coordinator: TomonsDataUpdateCoordinator) -> None:
+        super().__init__(coordinator, "mac_address")
+        self._attr_name = "MAC-Adresse"
+
+    @property
+    def native_value(self) -> Optional[str]:
+        return getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
+

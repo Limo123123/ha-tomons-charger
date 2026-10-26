@@ -49,7 +49,7 @@ class TomonsRefreshStatusButton(CoordinatorEntity[TomonsDataUpdateCoordinator], 
             manufacturer=MANUFACTURER,
             model=f"Tomons AC Wallbox ({model_code})",
             connections=connections,
-            sw_version=getattr(self.coordinator, "firmware_version", "1.0.0"),
+            sw_version=getattr(self.coordinator, "firmware_version", None),
         )
 
     async def async_press(self) -> None:
