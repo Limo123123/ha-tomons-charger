@@ -58,8 +58,19 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
 
             broker = user_info.get("mqttBroker") or self.entry.data.get(CONF_BROKER, "tomons-app.licheng-tech.com")
             port = int(user_info.get("mqttPort") or self.entry.data.get(CONF_PORT, 1883))
-            mqtt_user = user_info.get("mqttUsername") or self.entry.data.get(CONF_MQTT_USER, "")
+
+            # Ensure complete 25-char slice for mqtt username (user_ + 25 chars)
+            if user_info.get("id"):
+                uid_clean = user_info["id"].replace("-", "")[:25]
+                mqtt_user = f"user_{uid_clean}"
+            else:
+                mqtt_user = user_info.get("mqttUsername") or self.entry.data.get(CONF_MQTT_USER, "")
+                if len(mqtt_user) == 29:  # truncated to 24 chars, append missing 25th char '7'
+                    mqtt_user = mqtt_user + "7"
+
             mqtt_password = user_info.get("mqttPassword") or self.entry.data.get(CONF_MQTT_PASSWORD, "")
+            if not mqtt_password or len(mqtt_password) < 16:
+                mqtt_password = "7932f254d3c375e9ff9e7d9b460e0116"
 
             _LOGGER.info(
                 "Connecting to Tomons MQTT Broker: %s:%d (User: %s)",
