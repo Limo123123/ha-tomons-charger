@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tomons Cloud Login",
+        "description": "Enter your Tomons / Licheng credentials (email and password). The integration will automatically discover your charger and establish an MQTT connection.",
+        "data": {
+          "email": "Email Address",
+          "password": "Password"
+        }
+      },
+      "device": {
+        "title": "Select Wallbox",
+        "description": "Select the wallbox from your account to integrate.",
+        "data": {
+          "device_id": "Device"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "no_devices": "No registered wallbox found in this account.",
+      "cannot_connect": "Could not connect to cloud server."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "voltage": { "name": "Grid Voltage" },
+      "current": { "name": "Charging Current" },
+      "power": { "name": "Active Power" },
+      "total_energy": { "name": "Total Energy" },
+      "session_energy": { "name": "Last Session Energy" },
+      "temperature": { "name": "Enclosure Temperature" },
+      "current_limit": { "name": "Configured Current Limit" },
+      "cable_status": { "name": "Cable & Charging Status" },
+      "mode": { "name": "Charging Mode" }
+    },
+    "binary_sensor": {
+      "plugged_in": { "name": "Vehicle Plugged In" },
+      "charging": { "name": "Charging Active" },
+      "connectivity": { "name": "Connectivity" }
+    },
+    "number": {
+      "charging_current": { "name": "Charging Current Limit" }
+    },
+    "switch": {
+      "charging_control": { "name": "Charge" }
+    },
+    "button": {
+      "refresh_status": { "name": "Refresh Telemetry" }
+    }
+  }
+}

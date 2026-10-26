@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tomons Cloud Anmeldung",
+        "description": "Gib deine Tomons Zugangsdaten (E-Mail und Passwort) ein. Die Integration findet deine Wallbox und verbindet sich automatisch mit dem MQTT-Broker.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        }
+      },
+      "device": {
+        "title": "Wallbox auswählen",
+        "description": "Wähle die Wallbox aus deinem Account aus, die du konfigurieren möchtest.",
+        "data": {
+          "device_id": "Gerät"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültige E-Mail-Adresse oder falsches Passwort.",
+      "no_devices": "Keine registrierte Wallbox in diesem Account gefunden.",
+      "cannot_connect": "Verbindung zum Cloud-Server fehlgeschlagen."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "voltage": { "name": "Netzspannung" },
+      "current": { "name": "Ladestrom" },
+      "power": { "name": "Wirkleistung" },
+      "total_energy": { "name": "Gesamtenergie" },
+      "session_energy": { "name": "Ladeenergie Letzte Ladung" },
+      "temperature": { "name": "Gehäusetemperatur" },
+      "current_limit": { "name": "Eingestellte Stromgrenze" },
+      "cable_status": { "name": "Kabel- & Ladestatus" },
+      "mode": { "name": "Lademodus" }
+    },
+    "binary_sensor": {
+      "plugged_in": { "name": "Fahrzeug angesteckt" },
+      "charging": { "name": "Ladevorgang aktiv" },
+      "connectivity": { "name": "Verbindung" }
+    },
+    "number": {
+      "charging_current": { "name": "Ladestromgrenze" }
+    },
+    "switch": {
+      "charging_control": { "name": "Laden" }
+    },
+    "button": {
+      "refresh_status": { "name": "Telemetrie aktualisieren" }
+    }
+  }
+}
