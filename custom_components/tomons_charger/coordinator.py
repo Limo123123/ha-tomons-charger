@@ -18,6 +18,7 @@ from .const import (
     CONF_PORT,
     CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
+    CONF_MAC,
     DEFAULT_SCAN_INTERVAL,
 )
 from .tomons_charger import TomonsCharger, TomonsCloudClient, ChargerTelemetry
