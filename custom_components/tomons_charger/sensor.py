@@ -169,6 +169,11 @@ class TomonsSessionEnergySensor(TomonsBaseSensor):
         # If currently charging, return running session kWh; otherwise return the final kWh of the last completed session
         if self.coordinator._was_charging:
             return round(self.coordinator.session_energy_kwh, 2)
+        if self.coordinator.last_session_energy_kwh > 0.001:
+            return round(self.coordinator.last_session_energy_kwh, 2)
+        hw_energy = getattr(self.coordinator.data, "hardware_session_energy_kwh", None)
+        if hw_energy is not None and hw_energy > 0:
+            return round(hw_energy, 2)
         return round(self.coordinator.last_session_energy_kwh, 2)
 
 

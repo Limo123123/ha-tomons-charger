@@ -110,15 +110,14 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         now = time.time()
         power = telemetry.power_w or 0
         current = telemetry.current_a or 0.0
-        is_charging = (
-            telemetry.cable_status == "Lädt aktiv"
-            or (telemetry.cable_status is not None and "Lädt" in telemetry.cable_status)
-            or power > 50
-            or current > 0.5
-        )
+        status = telemetry.cable_status or ""
 
-        if is_charging and (not telemetry.cable_status or "Nicht verbunden" in telemetry.cable_status):
-            telemetry.cable_status = "Lädt aktiv"
+        # Charging session detection
+        is_charging = (
+            status == "Lädt aktiv"
+            or ("Lädt" in status and power > 50)
+            or (power > 200 and current > 1.0 and status != "Nicht verbunden (Standby)")
+        )
 
         # Track session energy integration: Power (W) * dt (h) / 1000 = kWh
         if is_charging:
@@ -150,8 +149,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                     self.last_session_energy_kwh,
                 )
 
-        # Preserve configured current limit if telemetry didn't specify one
-        if self.current_limit_a is not None:
+        # Sync configured current limit
+        if telemetry.max_current_a is not None:
+            self.current_limit_a = telemetry.max_current_a
+        elif self.current_limit_a is not None:
             telemetry.max_current_a = self.current_limit_a
 
         # Thread-safe dispatch to Home Assistant event loop
@@ -168,7 +169,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             except Exception as err:
                 _LOGGER.warning("Could not send status request to Wallbox: %s", err)
             telemetry = self.charger.get_telemetry()
-            if self.current_limit_a is not None:
+            if telemetry.max_current_a is not None:
+                self.current_limit_a = telemetry.max_current_a
+            elif self.current_limit_a is not None:
                 telemetry.max_current_a = self.current_limit_a
             return telemetry
         return ChargerTelemetry(max_current_a=self.current_limit_a)
