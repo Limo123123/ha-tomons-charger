@@ -109,11 +109,16 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         """Process incoming live telemetry packet from MQTT thread."""
         now = time.time()
         power = telemetry.power_w or 0
+        current = telemetry.current_a or 0.0
         is_charging = (
             telemetry.cable_status == "Lädt aktiv"
             or (telemetry.cable_status is not None and "Lädt" in telemetry.cable_status)
             or power > 50
+            or current > 0.5
         )
+
+        if is_charging and (not telemetry.cable_status or "Nicht verbunden" in telemetry.cable_status):
+            telemetry.cable_status = "Lädt aktiv"
 
         # Track session energy integration: Power (W) * dt (h) / 1000 = kWh
         if is_charging:
@@ -127,7 +132,11 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 if self._last_power_timestamp is not None:
                     dt_hours = (now - self._last_power_timestamp) / 3600.0
                     if 0 < dt_hours < 0.2:  # Sanity check: max gap 12 minutes
-                        added_kwh = (power / 1000.0) * dt_hours
+                        effective_power = power
+                        if effective_power <= 0 and current > 0.5:
+                            v = telemetry.voltage_v or 230.0
+                            effective_power = round((v / 1.73205 * current * 3) if v > 300 else (v * current))
+                        added_kwh = (effective_power / 1000.0) * dt_hours
                         self.session_energy_kwh += added_kwh
                 self._last_power_timestamp = now
         else:

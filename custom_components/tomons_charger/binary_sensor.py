@@ -71,10 +71,12 @@ class TomonsPluggedInBinarySensor(TomonsBaseBinarySensor):
 
     @property
     def is_on(self) -> bool:
-        if not self.coordinator.data or not self.coordinator.data.cable_status:
+        if not self.coordinator.data:
             return False
-        status = self.coordinator.data.cable_status
-        return "Verbunden" in status or "Lädt" in status
+        power = self.coordinator.data.power_w or 0
+        current = self.coordinator.data.current_a or 0.0
+        status = self.coordinator.data.cable_status or ""
+        return "Verbunden" in status or "Lädt" in status or power > 50 or current > 0.5
 
 
 class TomonsChargingBinarySensor(TomonsBaseBinarySensor):
@@ -92,8 +94,9 @@ class TomonsChargingBinarySensor(TomonsBaseBinarySensor):
         if not self.coordinator.data:
             return False
         power = self.coordinator.data.power_w or 0
+        current = self.coordinator.data.current_a or 0.0
         status = self.coordinator.data.cable_status or ""
-        return "Lädt aktiv" in status or power > 50
+        return "Lädt aktiv" in status or power > 50 or current > 0.5
 
 
 class TomonsOnlineBinarySensor(TomonsBaseBinarySensor):
