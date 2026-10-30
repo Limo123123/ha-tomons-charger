@@ -57,6 +57,8 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self._running_session_kwh: float = 0.0
         self._last_power_timestamp: Optional[float] = None
         self._was_charging: bool = False
+        self.is_online: bool = False
+        self._last_telemetry_time: Optional[float] = None
 
         self._energy_file: Optional[str] = None
         try:
@@ -127,6 +129,15 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             self.cloud = TomonsCloudClient(email=self.email, password=self.password)
             user_info = await self.hass.async_add_executor_job(self.cloud.login)
 
+            # Check initial device online status via cloud API
+            try:
+                dev_status = await self.hass.async_add_executor_job(self.cloud.get_device_status, self.device_id)
+                self.is_online = (dev_status.get("device_status") == 1)
+                _LOGGER.info("Tomons Wallbox initial online status from cloud: %s", self.is_online)
+            except Exception as err:
+                _LOGGER.debug("Could not get initial cloud device status: %s", err)
+                self.is_online = False
+
             broker = user_info.get("mqttBroker") or self.entry.data.get(CONF_BROKER, "tomons-app.licheng-tech.com")
             port = int(user_info.get("mqttPort") or self.entry.data.get(CONF_PORT, 1883))
 
@@ -180,6 +191,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
     def _handle_telemetry(self, telemetry: ChargerTelemetry) -> None:
         """Process incoming live telemetry packet from MQTT thread."""
         now = time.time()
+        self._last_telemetry_time = now
+        self.is_online = True
+        telemetry.is_online = True
+
         power = telemetry.power_w or 0
         current = telemetry.current_a or 0.0
         status = telemetry.cable_status or ""
@@ -277,7 +292,26 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, telemetry)
 
     async def _async_update_data(self) -> ChargerTelemetry:
-        """Periodic heartbeat poll: send 0xCE01 status request to keep telemetry stream alive."""
+        """Periodic heartbeat poll: check online status, keep telemetry stream alive."""
+        now = time.time()
+
+        recently_active = (
+            self._last_telemetry_time is not None
+            and (now - self._last_telemetry_time) < 70.0
+        )
+
+        if not recently_active and self.cloud:
+            try:
+                dev_status = await self.hass.async_add_executor_job(self.cloud.get_device_status, self.device_id)
+                self.is_online = (dev_status.get("device_status") == 1)
+            except Exception as err:
+                _LOGGER.debug("Error checking cloud device status: %s", err)
+                if self._last_telemetry_time is None or (now - self._last_telemetry_time) > 90.0:
+                    self.is_online = False
+        else:
+            if recently_active:
+                self.is_online = True
+
         if self.charger:
             if not self.charger.is_connected:
                 _LOGGER.info("Tomons Wallbox: MQTT connection lost, reconnecting...")
@@ -292,8 +326,20 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             elif self.current_limit_a is not None:
                 telemetry.max_current_a = self.current_limit_a
             telemetry.total_energy_kwh = self.total_energy_kwh
+            telemetry.is_online = self.is_online
+
+            if not self.is_online:
+                telemetry.cable_status = "Offline"
+                telemetry.power_w = 0
+                telemetry.current_a = 0.0
+
             return telemetry
-        return ChargerTelemetry(max_current_a=self.current_limit_a, total_energy_kwh=self.total_energy_kwh)
+        return ChargerTelemetry(
+            max_current_a=self.current_limit_a,
+            total_energy_kwh=self.total_energy_kwh,
+            is_online=self.is_online,
+            cable_status="Offline" if not self.is_online else "Nicht verbunden (Standby)",
+        )
 
     async def async_set_current_limit(self, amps: int) -> None:
         """Set charging current limit in Amperes (e.g. 6, 8, 10, 16, 32 A)."""

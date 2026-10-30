@@ -43,6 +43,15 @@ class TomonsBaseBinarySensor(CoordinatorEntity[TomonsDataUpdateCoordinator], Bin
         self._attr_has_entity_name = True
 
     @property
+    def available(self) -> bool:
+        """Return True if binary sensor is available."""
+        if not super().available:
+            return False
+        if self._sensor_type == "connectivity":
+            return True
+        return self.coordinator.is_online
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information with MAC network connection for router linking."""
         mac = self.coordinator.entry.data.get(CONF_MAC) or getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
@@ -115,4 +124,4 @@ class TomonsOnlineBinarySensor(TomonsBaseBinarySensor):
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.data.is_online if self.coordinator.data else False
+        return self.coordinator.is_online

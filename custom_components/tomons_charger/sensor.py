@@ -63,6 +63,24 @@ class TomonsBaseSensor(CoordinatorEntity[TomonsDataUpdateCoordinator], SensorEnt
         self._attr_has_entity_name = True
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        if not super().available:
+            return False
+        # Persistent metrics and diagnostics stay available even when Wallbox is offline
+        if self._sensor_type in (
+            "total_energy",
+            "session_energy",
+            "session_duration",
+            "current_limit",
+            "mac_address",
+            "mode",
+            "cable_status",
+        ):
+            return True
+        return self.coordinator.is_online
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information with MAC network connection for router linking."""
         mac = self.coordinator.entry.data.get(CONF_MAC) or getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
@@ -278,6 +296,8 @@ class TomonsCableStatusSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> str:
+        if not self.coordinator.is_online:
+            return "Offline"
         if self.coordinator.data and self.coordinator.data.cable_status and self.coordinator.data.cable_status != "Unbekannt":
             return self.coordinator.data.cable_status
         return "Nicht verbunden (Standby)"

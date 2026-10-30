@@ -62,6 +62,11 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
         )
 
     @property
+    def available(self) -> bool:
+        """Return True if slider is available."""
+        return super().available and self.coordinator.is_online
+
+    @property
     def native_value(self) -> float:
         """Return currently set charging current limit in Amperes."""
         if getattr(self.coordinator, "current_limit_a", None) is not None:
