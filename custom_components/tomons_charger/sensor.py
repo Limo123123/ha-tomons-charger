@@ -12,6 +12,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfEnergy,
     UnitOfTemperature,
+    UnitOfTime,
     EntityCategory,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -39,6 +40,7 @@ async def async_setup_entry(
         TomonsPowerSensor(coordinator),
         TomonsTotalEnergySensor(coordinator),
         TomonsSessionEnergySensor(coordinator),
+        TomonsSessionDurationSensor(coordinator),
         TomonsTemperatureSensor(coordinator),
         TomonsCurrentLimitSensor(coordinator),
         TomonsCableStatusSensor(coordinator),
@@ -166,15 +168,35 @@ class TomonsSessionEnergySensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> float:
-        # If currently charging, return running session kWh; otherwise return the final kWh of the last completed session
+        # Prioritize hardware metered counter from Wallbox (Word 6 of Tag 0xC302)
+        if self.coordinator.data:
+            hw_energy = getattr(self.coordinator.data, "hardware_session_energy_kwh", None)
+            if hw_energy is not None and hw_energy > 0:
+                return round(hw_energy, 2)
         if self.coordinator._was_charging:
             return round(self.coordinator.session_energy_kwh, 2)
-        if self.coordinator.last_session_energy_kwh > 0.001:
-            return round(self.coordinator.last_session_energy_kwh, 2)
-        hw_energy = getattr(self.coordinator.data, "hardware_session_energy_kwh", None)
-        if hw_energy is not None and hw_energy > 0:
-            return round(hw_energy, 2)
         return round(self.coordinator.last_session_energy_kwh, 2)
+
+
+class TomonsSessionDurationSensor(TomonsBaseSensor):
+    """Session Charging Duration sensor (Minutes)."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_translation_key = "session_duration"
+
+    def __init__(self, coordinator: TomonsDataUpdateCoordinator) -> None:
+        super().__init__(coordinator, "session_duration")
+        self._attr_name = "Ladedauer"
+
+    @property
+    def native_value(self) -> Optional[int]:
+        if self.coordinator.data:
+            duration_s = getattr(self.coordinator.data, "session_duration_s", None)
+            if duration_s is not None and duration_s > 0:
+                return round(duration_s / 60)
+        return 0
 
 
 class TomonsTemperatureSensor(TomonsBaseSensor):

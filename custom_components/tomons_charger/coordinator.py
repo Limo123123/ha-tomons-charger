@@ -94,6 +94,11 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
 
             self.charger.on_telemetry_received = self._handle_telemetry
 
+            # Restore cached current limit from telemetry fragment manager if available
+            cached_limit = getattr(self.charger.fragment_manager.last_telemetry, "max_current_a", None)
+            if cached_limit:
+                self.current_limit_a = cached_limit
+
             # 3. Connect to MQTT in executor thread
             await self.hass.async_add_executor_job(self.charger.connect)
 
