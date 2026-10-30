@@ -19,6 +19,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -135,7 +136,7 @@ class TomonsPowerSensor(TomonsBaseSensor):
         return None
 
 
-class TomonsTotalEnergySensor(TomonsBaseSensor):
+class TomonsTotalEnergySensor(TomonsBaseSensor, RestoreEntity):
     """Cumulative Total Energy sensor (kWh). Compatible with Home Assistant Energy Dashboard."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -147,14 +148,24 @@ class TomonsTotalEnergySensor(TomonsBaseSensor):
         super().__init__(coordinator, "total_energy")
         self._attr_name = "Gesamtenergie"
 
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added to HA and restore last state."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                restored_energy = float(last_state.state)
+                if restored_energy > 0:
+                    self.coordinator.restore_cumulative_energy(restored_energy)
+            except (ValueError, TypeError):
+                pass
+
     @property
     def native_value(self) -> Optional[float]:
-        if self.coordinator.data and getattr(self.coordinator.data, "total_energy_kwh", None) is not None:
-            return round(self.coordinator.data.total_energy_kwh, 2)
-        return 0.0
+        return self.coordinator.total_energy_kwh
 
 
-class TomonsSessionEnergySensor(TomonsBaseSensor):
+class TomonsSessionEnergySensor(TomonsBaseSensor, RestoreEntity):
     """Session Energy / 'Letzte Ladung' sensor (kWh)."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -166,16 +177,29 @@ class TomonsSessionEnergySensor(TomonsBaseSensor):
         super().__init__(coordinator, "session_energy")
         self._attr_name = "Ladeenergie Letzte Ladung"
 
+    async def async_added_to_hass(self) -> None:
+        """Restore last session energy on startup if coordinator has no data yet."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                val = float(last_state.state)
+                if val > 0 and self.coordinator.last_session_energy_kwh == 0.0:
+                    self.coordinator.last_session_energy_kwh = round(val, 2)
+            except (ValueError, TypeError):
+                pass
+
     @property
     def native_value(self) -> float:
-        # Prioritize hardware metered counter from Wallbox (Word 6 of Tag 0xC302)
+        if self.coordinator._was_charging:
+            return round(self.coordinator._running_session_kwh, 2)
+        if self.coordinator.last_session_energy_kwh > 0:
+            return round(self.coordinator.last_session_energy_kwh, 2)
         if self.coordinator.data:
             hw_energy = getattr(self.coordinator.data, "hardware_session_energy_kwh", None)
             if hw_energy is not None and hw_energy > 0:
                 return round(hw_energy, 2)
-        if self.coordinator._was_charging:
-            return round(self.coordinator.session_energy_kwh, 2)
-        return round(self.coordinator.last_session_energy_kwh, 2)
+        return 0.0
 
 
 class TomonsSessionDurationSensor(TomonsBaseSensor):

@@ -2,6 +2,8 @@
 
 import logging
 import time
+import json
+import os
 from datetime import timedelta
 from typing import Optional, Any, Dict
 
@@ -50,8 +52,73 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
 
         self.session_energy_kwh: float = 0.0
         self.last_session_energy_kwh: float = 0.0
+        self.cumulative_energy_kwh: float = 0.0
+        self._session_start_hw_energy: float = 0.0
+        self._running_session_kwh: float = 0.0
         self._last_power_timestamp: Optional[float] = None
         self._was_charging: bool = False
+
+        self._energy_file: Optional[str] = None
+        try:
+            if hasattr(self.hass, "config") and hasattr(self.hass.config, "path"):
+                self._energy_file = self.hass.config.path(f".{self.device_id}_energy.json")
+            else:
+                self._energy_file = f".{self.device_id}_energy.json"
+        except Exception:
+            self._energy_file = f".{self.device_id}_energy.json"
+
+        self._load_energy_cache()
+
+    def _load_energy_cache(self) -> None:
+        """Load persistent cumulative and last session energy from disk."""
+        if not self._energy_file:
+            return
+        try:
+            if os.path.exists(self._energy_file):
+                with open(self._energy_file, "r") as f:
+                    data = json.load(f)
+                    self.cumulative_energy_kwh = float(data.get("cumulative_energy_kwh", 0.0))
+                    self.last_session_energy_kwh = float(data.get("last_session_energy_kwh", 0.0))
+                    _LOGGER.info(
+                        "Loaded persistent energy cache: cumulative=%.2f kWh, last_session=%.2f kWh",
+                        self.cumulative_energy_kwh,
+                        self.last_session_energy_kwh,
+                    )
+        except Exception as ex:
+            _LOGGER.debug("Could not load energy cache: %s", ex)
+
+    def _save_energy_cache(self) -> None:
+        """Save persistent cumulative and last session energy to disk."""
+        if not self._energy_file:
+            return
+        try:
+            with open(self._energy_file, "w") as f:
+                json.dump({
+                    "cumulative_energy_kwh": round(self.cumulative_energy_kwh, 2),
+                    "last_session_energy_kwh": round(self.last_session_energy_kwh, 2),
+                }, f)
+        except Exception as ex:
+            _LOGGER.debug("Could not save energy cache: %s", ex)
+
+    def restore_cumulative_energy(self, restored_kwh: float) -> None:
+        """Restore cumulative energy from Home Assistant RestoreEntity."""
+        if restored_kwh > self.cumulative_energy_kwh:
+            _LOGGER.info(
+                "Restoring cumulative energy from HA entity state: %.2f kWh (was %.2f kWh)",
+                restored_kwh,
+                self.cumulative_energy_kwh,
+            )
+            self.cumulative_energy_kwh = round(restored_kwh, 2)
+            self._save_energy_cache()
+
+    @property
+    def total_energy_kwh(self) -> float:
+        """Return cumulative total energy in kWh (monotonic total_increasing)."""
+        running = self._running_session_kwh if self._was_charging else 0.0
+        total = self.cumulative_energy_kwh + running
+        if total == 0.0 and self.last_session_energy_kwh > 0:
+            total = self.last_session_energy_kwh
+        return round(total, 2)
 
     async def async_setup(self) -> bool:
         """Initialize cloud client, verify MQTT credentials, and connect charger."""
@@ -124,14 +191,26 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             or (power > 200 and current > 1.0 and status != "Nicht verbunden (Standby)")
         )
 
-        # Track session energy integration: Power (W) * dt (h) / 1000 = kWh
+        hw_energy = getattr(telemetry, "hardware_session_energy_kwh", None)
+        hw_total = getattr(telemetry, "total_energy_kwh", None)
+        if hw_total is not None and hw_total > 0 and hw_total > self.cumulative_energy_kwh:
+            self.cumulative_energy_kwh = round(hw_total, 2)
+            self._save_energy_cache()
+
         if is_charging:
             if not self._was_charging:
                 # Started new charging session
-                self.session_energy_kwh = 0.0
                 self._was_charging = True
+                self.session_energy_kwh = 0.0
+                if hw_energy is not None and (hw_energy <= 0.1 or hw_energy < self.last_session_energy_kwh):
+                    self._session_start_hw_energy = 0.0
+                else:
+                    self._session_start_hw_energy = hw_energy if (hw_energy is not None and hw_energy > 0) else 0.0
                 self._last_power_timestamp = now
-                _LOGGER.info("Tomons Wallbox: Charging session started")
+                _LOGGER.info(
+                    "Tomons Wallbox: Charging session started (start hw_energy=%.2f kWh)",
+                    self._session_start_hw_energy,
+                )
             else:
                 if self._last_power_timestamp is not None:
                     dt_hours = (now - self._last_power_timestamp) / 3600.0
@@ -143,22 +222,56 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                         added_kwh = (effective_power / 1000.0) * dt_hours
                         self.session_energy_kwh += added_kwh
                 self._last_power_timestamp = now
+
+                # If hardware meter has reset for the new session, adjust start offset
+                if hw_energy is not None and hw_energy < self._session_start_hw_energy:
+                    self._session_start_hw_energy = 0.0
+
+            # Calculate live running session energy
+            running_hw = 0.0
+            if hw_energy is not None:
+                if hw_energy >= self._session_start_hw_energy:
+                    running_hw = hw_energy - self._session_start_hw_energy
+                else:
+                    running_hw = hw_energy
+            self._running_session_kwh = max(running_hw, self.session_energy_kwh)
         else:
             if self._was_charging:
-                # Finished charging session
-                self.last_session_energy_kwh = round(self.session_energy_kwh, 2)
+                # Finished charging session!
+                delivered_kwh = max(self._running_session_kwh, self.session_energy_kwh)
+                if delivered_kwh > 0:
+                    self.last_session_energy_kwh = round(delivered_kwh, 2)
+                    self.cumulative_energy_kwh = round(self.cumulative_energy_kwh + delivered_kwh, 2)
+                    self._save_energy_cache()
                 self._was_charging = False
                 self._last_power_timestamp = None
+                self._session_start_hw_energy = 0.0
+                self._running_session_kwh = 0.0
                 _LOGGER.info(
-                    "Tomons Wallbox: Charging session ended. Total session: %.2f kWh",
+                    "Tomons Wallbox: Charging session ended. Session: %.2f kWh, Total Cumulative: %.2f kWh",
                     self.last_session_energy_kwh,
+                    self.cumulative_energy_kwh,
                 )
+            else:
+                # Standby / Idle: seed cumulative_energy_kwh if 0 and hardware reports last session
+                if self.cumulative_energy_kwh == 0.0 and hw_energy is not None and hw_energy > 0:
+                    self.cumulative_energy_kwh = round(hw_energy, 2)
+                    self.last_session_energy_kwh = round(hw_energy, 2)
+                    self._save_energy_cache()
+                    _LOGGER.info(
+                        "Seeded cumulative energy from Wallbox last session: %.2f kWh",
+                        self.cumulative_energy_kwh,
+                    )
+                self._running_session_kwh = 0.0
 
         # Sync configured current limit
         if telemetry.max_current_a is not None:
             self.current_limit_a = telemetry.max_current_a
         elif self.current_limit_a is not None:
             telemetry.max_current_a = self.current_limit_a
+
+        # Keep telemetry total_energy_kwh consistent with coordinator
+        telemetry.total_energy_kwh = self.total_energy_kwh
 
         # Thread-safe dispatch to Home Assistant event loop
         self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, telemetry)
@@ -178,8 +291,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 self.current_limit_a = telemetry.max_current_a
             elif self.current_limit_a is not None:
                 telemetry.max_current_a = self.current_limit_a
+            telemetry.total_energy_kwh = self.total_energy_kwh
             return telemetry
-        return ChargerTelemetry(max_current_a=self.current_limit_a)
+        return ChargerTelemetry(max_current_a=self.current_limit_a, total_energy_kwh=self.total_energy_kwh)
 
     async def async_set_current_limit(self, amps: int) -> None:
         """Set charging current limit in Amperes (e.g. 6, 8, 10, 16, 32 A)."""
