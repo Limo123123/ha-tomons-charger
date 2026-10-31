@@ -64,6 +64,11 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.is_online: bool = False
         self._last_telemetry_time: Optional[float] = None
 
+        # Anomaly and spike filter tracking (debouncing & confirmation re-checks)
+        self._anomaly_counts: Dict[str, int] = {}
+        self._last_valid_metrics: Dict[str, Any] = {}
+        self._last_recheck_time: float = 0.0
+
         self._energy_file: Optional[str] = None
         try:
             if hasattr(self.hass, "config") and hasattr(self.hass.config, "path"):
@@ -111,6 +116,111 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         """Return human-readable model name including power rating and model code."""
         power_str = "11 kW / 16 A" if self.max_hardware_current_a == 16 else "22 kW / 32 A"
         return f"Tomons AC Wallbox {power_str} ({self.model_code})"
+
+    def _is_metric_plausible(self, metric: str, val: Any) -> bool:
+        """Check if telemetry value is within realistic physical boundaries."""
+        if val is None:
+            return True
+        try:
+            num = float(val)
+        except (ValueError, TypeError):
+            return False
+
+        if metric == "power_w":
+            # For 16 A / 11 kW: max ~13500 W. For 32 A / 22 kW: max ~25000 W.
+            max_power = 13500 if self.max_hardware_current_a <= 16 else 25000
+            return 0 <= num <= max_power
+
+        elif metric == "voltage_v":
+            if num == 0.0:
+                return True
+            # European grid: nominal 230 V (1-phase: 180..265 V) or 400 V (3-phase: 320..445 V)
+            # Spikes to 480 V are strictly rejected as unphysical
+            return (180.0 <= num <= 265.0) or (320.0 <= num <= 445.0)
+
+        elif metric == "current_a":
+            # Max current: 18.5 A for 16 A box, 36.0 A for 32 A box
+            max_current = 18.5 if self.max_hardware_current_a <= 16 else 36.0
+            return 0.0 <= num <= max_current
+
+        elif metric == "temperature_c":
+            return -25.0 <= num <= 75.0
+
+        return True
+
+    def _filter_and_verify_telemetry(self, telemetry: ChargerTelemetry) -> ChargerTelemetry:
+        """Filter unrealistic spikes, request confirmation re-checks, and debounce anomalies."""
+        metrics_to_check = ["power_w", "voltage_v", "current_a", "temperature_c"]
+        has_unconfirmed_anomaly = False
+        confirmation_threshold = 3
+
+        for metric in metrics_to_check:
+            val = getattr(telemetry, metric, None)
+            if val is None:
+                continue
+
+            if self._is_metric_plausible(metric, val):
+                # Normal valid value: reset anomaly counter and update last known good value
+                self._anomaly_counts[metric] = 0
+                self._last_valid_metrics[metric] = val
+            else:
+                # Unrealistic spike detected!
+                count = self._anomaly_counts.get(metric, 0) + 1
+                self._anomaly_counts[metric] = count
+
+                if count < confirmation_threshold:
+                    # Unconfirmed anomaly: suppress the spike and restore last known valid value
+                    has_unconfirmed_anomaly = True
+                    fallback = self._last_valid_metrics.get(metric)
+                    if fallback is None:
+                        fallback = 0 if metric == "power_w" else (0.0 if metric == "current_a" else (400.0 if metric == "voltage_v" else 20.0))
+
+                    _LOGGER.warning(
+                        "Tomons Wallbox: Unrealistic %s spike detected (%s). "
+                        "Suppressing spike (attempt %d/%d) and requesting immediate re-check from Wallbox...",
+                        metric,
+                        val,
+                        count,
+                        confirmation_threshold,
+                    )
+                    setattr(telemetry, metric, fallback)
+                else:
+                    # Confirmed repeatedly (>= 3 times): accept the value
+                    _LOGGER.warning(
+                        "Tomons Wallbox: %s value %s confirmed %d times consecutively; accepting value.",
+                        metric,
+                        val,
+                        count,
+                    )
+                    self._last_valid_metrics[metric] = val
+
+        if has_unconfirmed_anomaly:
+            self._schedule_recheck_threadsafe()
+
+        return telemetry
+
+    def _schedule_recheck_threadsafe(self) -> None:
+        """Thread-safe scheduling of an immediate status query to recheck suspected spikes."""
+        now = time.time()
+        if (now - self._last_recheck_time) < 1.5:
+            return  # Rate-limit to prevent spamming
+        self._last_recheck_time = now
+
+        try:
+            if hasattr(self.hass, "loop") and self.hass.loop and self.hass.loop.is_running():
+                self.hass.loop.call_soon_threadsafe(self._async_trigger_recheck_task)
+            else:
+                self._async_trigger_recheck_task()
+        except Exception as ex:
+            _LOGGER.debug("Could not schedule spike re-check task: %s", ex)
+
+    def _async_trigger_recheck_task(self) -> None:
+        """Create async task on HA event loop to send status request."""
+        try:
+            if hasattr(self.hass, "async_create_task"):
+                self.hass.async_create_task(self.async_request_status())
+        except Exception as ex:
+            _LOGGER.debug("Error creating async status request task: %s", ex)
 
     def _load_energy_cache(self) -> None:
         """Load persistent cumulative and last session energy from disk."""
@@ -236,6 +346,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.is_online = True
         telemetry.is_online = True
 
+        # Apply anomaly and spike filter with verification re-queries
+        telemetry = self._filter_and_verify_telemetry(telemetry)
+
         power = telemetry.power_w or 0
         current = telemetry.current_a or 0.0
         status = telemetry.cable_status or ""
@@ -275,6 +388,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                         if effective_power <= 0 and current > 0.5:
                             v = telemetry.voltage_v or 230.0
                             effective_power = round((v / 1.73205 * current * 3) if v > 300 else (v * current))
+                        max_allowed_power = 13500 if self.max_hardware_current_a <= 16 else 25000
+                        if effective_power > max_allowed_power:
+                            effective_power = max_allowed_power
                         added_kwh = (effective_power / 1000.0) * dt_hours
                         self.session_energy_kwh += added_kwh
                 self._last_power_timestamp = now
@@ -369,6 +485,7 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             except Exception as err:
                 _LOGGER.warning("Could not send status request to Wallbox: %s", err)
             telemetry = self.charger.get_telemetry()
+            telemetry = self._filter_and_verify_telemetry(telemetry)
             if telemetry.max_current_a is not None:
                 self.current_limit_a = telemetry.max_current_a
             elif self.current_limit_a is not None:

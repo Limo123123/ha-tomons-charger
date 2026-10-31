@@ -500,7 +500,7 @@ class InateckFragmentManager:
         m_idx = payload.find(b"\xc3\x02")
         if m_idx != -1 and m_idx + 2 < len(payload):
             tag_len = payload[m_idx + 2]
-            if tag_len >= 14 and m_idx + 3 + 14 <= len(payload):
+            if tag_len in (14, 16) and m_idx + 3 + 14 <= len(payload):
                 try:
                     data_start = m_idx + 3
 
