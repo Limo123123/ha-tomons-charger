@@ -21,6 +21,8 @@ from .const import (
     CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
     CONF_MAC,
+    CONF_PRODUCT_MODEL,
+    CONF_MAX_CURRENT_LIMIT,
     DEFAULT_SCAN_INTERVAL,
 )
 from .tomons_charger import TomonsCharger, TomonsCloudClient, ChargerTelemetry
@@ -45,7 +47,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.password: str = entry.data.get(CONF_PASSWORD, "")
         self.mac: str = entry.data.get(CONF_MAC, "AC:A7:04:88:43:02")
         self.firmware_version: Optional[str] = entry.data.get("firmware_version", None)
-        self.current_limit_a: int = 16
+        self.model_code: str = str(entry.data.get(CONF_PRODUCT_MODEL, "5242896"))
+        self.max_hardware_current_a: int = self._determine_max_hardware_current()
+        self.current_limit_a: int = min(16, self.max_hardware_current_a)
 
         self.cloud: Optional[TomonsCloudClient] = None
         self.charger: Optional[TomonsCharger] = None
@@ -70,6 +74,43 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             self._energy_file = f".{self.device_id}_energy.json"
 
         self._load_energy_cache()
+
+    def _determine_max_hardware_current(self) -> int:
+        """Determine maximum supported charging current in Amperes based on model code or options."""
+        # 1. User manual override from config entry options
+        opt_limit = self.entry.options.get(CONF_MAX_CURRENT_LIMIT)
+        if opt_limit:
+            try:
+                opt_int = int(opt_limit)
+                if opt_int in (16, 32):
+                    return opt_int
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Check product model code (e.g. 5242896 for 16A, 5242912 for 32A)
+        raw_model = self.entry.data.get(CONF_PRODUCT_MODEL) or self.model_code
+        try:
+            model_int = int(raw_model)
+            # Low byte encodes max current rating: 0x10 -> 16 A, 0x20 -> 32 A
+            low_byte = model_int & 0xFF
+            if low_byte == 0x20 or model_int == 5242912:
+                return 32
+            if low_byte == 0x10 or model_int == 5242896:
+                return 16
+        except (ValueError, TypeError):
+            pass
+
+        if "32" in str(raw_model):
+            return 32
+
+        # 3. Default to 16 A (safe default for standard 11 kW CEE16 / 3.7 kW Schuko units)
+        return 16
+
+    @property
+    def model_name(self) -> str:
+        """Return human-readable model name including power rating and model code."""
+        power_str = "11 kW / 16 A" if self.max_hardware_current_a == 16 else "22 kW / 32 A"
+        return f"Tomons AC Wallbox {power_str} ({self.model_code})"
 
     def _load_energy_cache(self) -> None:
         """Load persistent cumulative and last session energy from disk."""
@@ -279,8 +320,15 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                     )
                 self._running_session_kwh = 0.0
 
-        # Sync configured current limit
+        # Sync configured current limit and auto-detect 32A hardware capability if reported
         if telemetry.max_current_a is not None:
+            if telemetry.max_current_a > 16 and self.max_hardware_current_a < 32:
+                if not self.entry.options.get(CONF_MAX_CURRENT_LIMIT):
+                    _LOGGER.info(
+                        "Tomons Wallbox reported current limit %d A > 16 A; upgrading hardware limit to 32 A",
+                        telemetry.max_current_a,
+                    )
+                    self.max_hardware_current_a = 32
             self.current_limit_a = telemetry.max_current_a
         elif self.current_limit_a is not None:
             telemetry.max_current_a = self.current_limit_a
@@ -345,6 +393,16 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         """Set charging current limit in Amperes (e.g. 6, 8, 10, 16, 32 A)."""
         if not self.charger:
             return
+        if amps > self.max_hardware_current_a:
+            _LOGGER.warning(
+                "Requested current limit %d A exceeds hardware maximum %d A; clamping to %d A",
+                amps,
+                self.max_hardware_current_a,
+                self.max_hardware_current_a,
+            )
+            amps = self.max_hardware_current_a
+        elif amps < 6:
+            amps = 6
         _LOGGER.info("Setting Wallbox current limit to %d A", amps)
         self.current_limit_a = amps
         if not self.charger.is_connected:

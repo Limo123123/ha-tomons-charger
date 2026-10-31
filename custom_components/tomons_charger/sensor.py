@@ -91,7 +91,7 @@ class TomonsBaseSensor(CoordinatorEntity[TomonsDataUpdateCoordinator], SensorEnt
             identifiers={(DOMAIN, self.coordinator.device_id)},
             name=self.coordinator.entry.data.get(CONF_DEVICE_NAME, "Tomons Wallbox"),
             manufacturer=MANUFACTURER,
-            model=f"Tomons AC Wallbox ({model_code})",
+            model=getattr(self.coordinator, "model_name", "Tomons AC Wallbox"),
             connections=connections,
             sw_version=getattr(self.coordinator, "firmware_version", None),
         )

@@ -32,7 +32,6 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
 
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 6.0
-    _attr_native_max_value = 32.0
     _attr_native_step = 1.0
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
     _attr_icon = "mdi:current-ac"
@@ -46,17 +45,21 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
         self._attr_name = "Ladestromgrenze"
 
     @property
+    def native_max_value(self) -> float:
+        """Return maximum configurable charging current limit in Amperes."""
+        return float(getattr(self.coordinator, "max_hardware_current_a", 16))
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information with MAC network connection for router linking."""
         mac = self.coordinator.entry.data.get(CONF_MAC) or getattr(self.coordinator, "mac", "AC:A7:04:88:43:02")
         connections = {(CONNECTION_NETWORK_MAC, mac)} if mac else set()
-        model_code = self.coordinator.entry.data.get(CONF_PRODUCT_MODEL, "5242896")
 
         return DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.device_id)},
             name=self.coordinator.entry.data.get(CONF_DEVICE_NAME, "Tomons Wallbox"),
             manufacturer=MANUFACTURER,
-            model=f"Tomons AC Wallbox ({model_code})",
+            model=getattr(self.coordinator, "model_name", "Tomons AC Wallbox"),
             connections=connections,
             sw_version=getattr(self.coordinator, "firmware_version", None),
         )
@@ -78,4 +81,9 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
     async def async_set_native_value(self, value: float) -> None:
         """Set a new charging current limit."""
         amps = int(round(value))
+        max_limit = getattr(self.coordinator, "max_hardware_current_a", 16)
+        if amps > max_limit:
+            amps = max_limit
+        if amps < 6:
+            amps = 6
         await self.coordinator.async_set_current_limit(amps)

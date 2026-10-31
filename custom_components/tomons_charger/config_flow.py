@@ -17,6 +17,7 @@ from .const import (
     CONF_MAC,
     CONF_PRODUCT_MODEL,
     CONF_CHIP_MODEL,
+    CONF_MAX_CURRENT_LIMIT,
     CONF_BROKER,
     CONF_PORT,
     CONF_MQTT_USER,
@@ -140,3 +141,60 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
         return self.async_create_entry(title=title, data=entry_data)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return TomonsOptionsFlow(config_entry)
+
+
+class TomonsOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for Tomons Wallbox integration."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        raw_model = self.config_entry.data.get(CONF_PRODUCT_MODEL, "5242896")
+        default_limit = 16
+        try:
+            m_int = int(raw_model)
+            if (m_int & 0xFF) == 0x20 or m_int == 5242912:
+                default_limit = 32
+        except (ValueError, TypeError):
+            if "32" in str(raw_model):
+                default_limit = 32
+
+        current_val = self.config_entry.options.get(
+            CONF_MAX_CURRENT_LIMIT,
+            default_limit,
+        )
+
+        options_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_MAX_CURRENT_LIMIT,
+                    default=int(current_val),
+                ): vol.In(
+                    {
+                        16: "16 A (11 kW 3-phasig CEE rot / 3.7 kW Schuko)",
+                        32: "32 A (22 kW 3-phasig CEE rot / 7.4 kW)",
+                    }
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=options_schema,
+        )
