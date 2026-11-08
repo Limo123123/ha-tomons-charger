@@ -69,6 +69,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self._last_valid_metrics: Dict[str, Any] = {}
         self._last_recheck_time: float = 0.0
 
+        # Charging power smoothing & zero-drop debounce tracking
+        self._last_charging_power: int = 0
+        self._consecutive_zero_power: int = 0
+
         self._energy_file: Optional[str] = None
         try:
             if hasattr(self.hass, "config") and hasattr(self.hass.config, "path"):
@@ -349,16 +353,67 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         # Apply anomaly and spike filter with verification re-queries
         telemetry = self._filter_and_verify_telemetry(telemetry)
 
-        power = telemetry.power_w or 0
+        # 1. Derive physical active power if current > 0.5 A but power is reported as 0 or None:
         current = telemetry.current_a or 0.0
+        v = telemetry.voltage_v or (400.0 if self.max_hardware_current_a == 16 else 230.0)
+        power = telemetry.power_w or 0
+
+        if power <= 0 and current > 0.5:
+            derived_power = round((v / 1.73205 * current * 3) if v > 300 else (v * current))
+            max_allowed = 13500 if self.max_hardware_current_a <= 16 else 25000
+            derived_power = min(derived_power, max_allowed)
+            if derived_power > 50:
+                telemetry.power_w = derived_power
+                power = derived_power
+
         status = telemetry.cable_status or ""
 
-        # Charging session detection
-        is_charging = (
+        # 2. Charging session detection from packet
+        raw_is_charging = (
             status == "Lädt aktiv"
             or ("Lädt" in status and power > 50)
             or (power > 200 and current > 1.0 and status != "Nicht verbunden (Standby)")
         )
+
+        # 3. Charging power smoothing & zero-drop glitch debounce
+        if self._was_charging:
+            if status == "Nicht verbunden (Standby)":
+                # Car was unplugged: immediate genuine stop
+                self._consecutive_zero_power = 0
+                self._last_charging_power = 0
+                is_charging = False
+                power = 0
+                telemetry.power_w = 0
+            elif raw_is_charging:
+                # Normal active charging with power
+                self._consecutive_zero_power = 0
+                self._last_charging_power = power
+                is_charging = True
+            else:
+                # Potential momentary zero dip while car is still plugged in!
+                self._consecutive_zero_power += 1
+                if self._consecutive_zero_power < 3 and self._last_charging_power > 0:
+                    # Suppress the zero drop: retain previous charging power
+                    power = self._last_charging_power
+                    telemetry.power_w = self._last_charging_power
+                    is_charging = True
+                    _LOGGER.debug(
+                        "Tomons Wallbox: Holding charging power %d W during momentary zero drop (%d/3)",
+                        self._last_charging_power,
+                        self._consecutive_zero_power,
+                    )
+                else:
+                    # Confirmed charging stop / pause after 3 consecutive zero readings
+                    self._consecutive_zero_power = 0
+                    self._last_charging_power = 0
+                    is_charging = False
+                    power = 0
+                    telemetry.power_w = 0
+        else:
+            is_charging = raw_is_charging
+            if is_charging and power > 50:
+                self._last_charging_power = power
+                self._consecutive_zero_power = 0
 
         hw_energy = getattr(telemetry, "hardware_session_energy_kwh", None)
         hw_total = getattr(telemetry, "total_energy_kwh", None)
@@ -497,6 +552,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 telemetry.cable_status = "Offline"
                 telemetry.power_w = 0
                 telemetry.current_a = 0.0
+            elif self._was_charging and (telemetry.power_w is None or telemetry.power_w <= 0) and self._last_charging_power > 0:
+                if telemetry.cable_status != "Nicht verbunden (Standby)":
+                    telemetry.power_w = self._last_charging_power
 
             return telemetry
         return ChargerTelemetry(

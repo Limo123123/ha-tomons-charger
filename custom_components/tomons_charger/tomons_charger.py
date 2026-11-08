@@ -547,7 +547,7 @@ class InateckFragmentManager:
                                     self.last_telemetry.max_current_a = gear
                                     self._save_cached_state()
                                 break
-                    elif state_raw == 0:
+                    elif state_raw == 0 and (p_raw <= 50 and i_raw <= 50):
                         self.last_telemetry.power_w = 0
                         self.last_telemetry.current_a = 0.0
 
