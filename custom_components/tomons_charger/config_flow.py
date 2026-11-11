@@ -66,7 +66,7 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._devices = devices
 
                     if len(devices) == 1:
-                        return self._create_entry_from_device(devices[0])
+                        return await self._create_entry_from_device(devices[0])
 
                     return await self.async_step_device()
 
@@ -97,7 +97,7 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             chosen_auth_id = user_input[CONF_DEVICE_ID]
             for dev in self._devices:
                 if dev.get("auth_id") == chosen_auth_id:
-                    return self._create_entry_from_device(dev)
+                    return await self._create_entry_from_device(dev)
 
         device_options = {
             d.get("auth_id", ""): f"{d.get('product_model_code', 'Tomons Wallbox')} ({d.get('mac_address', d.get('auth_id', '')[:8])})"
@@ -116,7 +116,7 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _create_entry_from_device(self, device: Dict[str, Any]) -> FlowResult:
+    async def _create_entry_from_device(self, device: Dict[str, Any]) -> FlowResult:
         """Create a config entry from a discovered device record."""
         auth_id = device.get("auth_id", "")
         mac = device.get("mac_address", "")
@@ -124,7 +124,8 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         chip_model = device.get("chip_model_code", "")
 
         # Use auth_id as unique ID to prevent duplicates
-        self._abort_if_unique_id_configured(updates={CONF_DEVICE_ID: auth_id})
+        await self.async_set_unique_id(auth_id)
+        self._abort_if_unique_id_configured()
 
         title = f"{product_model} ({mac if mac else auth_id[:8]})"
 
@@ -150,15 +151,26 @@ class TomonsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
-        return TomonsOptionsFlow(config_entry)
+        return TomonsOptionsFlow()
 
 
 class TomonsOptionsFlow(config_entries.OptionsFlow):
     """Handle options for Tomons Wallbox integration."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry: Optional[config_entries.ConfigEntry] = None) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        super().__init__()
+        self._entry_fallback = config_entry
+
+    @property
+    def _entry(self) -> Optional[config_entries.ConfigEntry]:
+        """Get config entry safely across all Home Assistant versions."""
+        try:
+            if hasattr(self, "config_entry") and self.config_entry is not None:
+                return self.config_entry
+        except Exception:
+            pass
+        return self._entry_fallback
 
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -167,7 +179,11 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        raw_model = self.config_entry.data.get(CONF_PRODUCT_MODEL, "5242896")
+        entry = self._entry
+        raw_model = "5242896"
+        if entry and hasattr(entry, "data"):
+            raw_model = entry.data.get(CONF_PRODUCT_MODEL, "5242896")
+
         default_limit = 16
         try:
             m_int = int(raw_model)
@@ -177,15 +193,17 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
             if "32" in str(raw_model):
                 default_limit = 32
 
-        current_val = self.config_entry.options.get(
-            CONF_MAX_CURRENT_LIMIT,
-            default_limit,
-        )
-
-        current_keep_available = self.config_entry.options.get(
-            CONF_KEEP_ENTITIES_AVAILABLE,
-            DEFAULT_KEEP_ENTITIES_AVAILABLE,
-        )
+        current_val = default_limit
+        current_keep_available = DEFAULT_KEEP_ENTITIES_AVAILABLE
+        if entry and hasattr(entry, "options"):
+            current_val = entry.options.get(
+                CONF_MAX_CURRENT_LIMIT,
+                default_limit,
+            )
+            current_keep_available = entry.options.get(
+                CONF_KEEP_ENTITIES_AVAILABLE,
+                DEFAULT_KEEP_ENTITIES_AVAILABLE,
+            )
 
         options_schema = vol.Schema(
             {
