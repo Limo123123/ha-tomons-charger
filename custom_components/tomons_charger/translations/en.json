@@ -52,5 +52,17 @@
     "button": {
       "refresh_status": { "name": "Refresh Telemetry" }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tomons Wallbox Settings",
+        "description": "Configure settings for your Tomons Wallbox.",
+        "data": {
+          "max_current_limit": "Maximum hardware current limit (16 A or 32 A)",
+          "keep_entities_available": "Keep entities available when wallbox is offline (prevents 'Unavailable' cards on dashboards)"
+        }
+      }
+    }
   }
 }

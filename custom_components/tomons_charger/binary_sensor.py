@@ -47,6 +47,8 @@ class TomonsBaseBinarySensor(CoordinatorEntity[TomonsDataUpdateCoordinator], Bin
         """Return True if binary sensor is available."""
         if not super().available:
             return False
+        if getattr(self.coordinator, "keep_entities_available", True):
+            return True
         if self._sensor_type == "connectivity":
             return True
         return self.coordinator.is_online
@@ -80,6 +82,8 @@ class TomonsPluggedInBinarySensor(TomonsBaseBinarySensor):
 
     @property
     def is_on(self) -> bool:
+        if not self.coordinator.is_online:
+            return False
         if not self.coordinator.data:
             return False
         status = self.coordinator.data.cable_status or ""
@@ -102,6 +106,8 @@ class TomonsChargingBinarySensor(TomonsBaseBinarySensor):
 
     @property
     def is_on(self) -> bool:
+        if not self.coordinator.is_online:
+            return False
         if not self.coordinator.data:
             return False
         status = self.coordinator.data.cable_status or ""

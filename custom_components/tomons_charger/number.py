@@ -67,7 +67,11 @@ class TomonsChargingCurrentNumber(CoordinatorEntity[TomonsDataUpdateCoordinator]
     @property
     def available(self) -> bool:
         """Return True if slider is available."""
-        return super().available and self.coordinator.is_online
+        if not super().available:
+            return False
+        if getattr(self.coordinator, "keep_entities_available", True):
+            return True
+        return self.coordinator.is_online
 
     @property
     def native_value(self) -> float:

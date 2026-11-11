@@ -10,6 +10,7 @@ CONF_MAC = "mac_address"
 CONF_PRODUCT_MODEL = "product_model_code"
 CONF_CHIP_MODEL = "chip_model_code"
 CONF_MAX_CURRENT_LIMIT = "max_current_limit"
+CONF_KEEP_ENTITIES_AVAILABLE = "keep_entities_available"
 CONF_BROKER = "broker"
 CONF_PORT = "port"
 CONF_MQTT_USER = "mqtt_user"
@@ -17,6 +18,7 @@ CONF_MQTT_PASSWORD = "mqtt_password"
 
 DEFAULT_NAME = "Tomons Wallbox"
 DEFAULT_SCAN_INTERVAL = 30  # seconds (status request interval to keep streaming alive)
+DEFAULT_KEEP_ENTITIES_AVAILABLE = True
 
 MANUFACTURER = "Inateck / Tomons"
 

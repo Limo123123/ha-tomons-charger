@@ -67,6 +67,9 @@ class TomonsBaseSensor(CoordinatorEntity[TomonsDataUpdateCoordinator], SensorEnt
         """Return True if entity is available."""
         if not super().available:
             return False
+        # If keep_entities_available is enabled (default: True), keep entities available with clean offline states
+        if getattr(self.coordinator, "keep_entities_available", True):
+            return True
         # Persistent metrics and diagnostics stay available even when Wallbox is offline
         if self._sensor_type in (
             "total_energy",
@@ -111,9 +114,11 @@ class TomonsVoltageSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[float]:
+        if not self.coordinator.is_online and getattr(self.coordinator, "keep_entities_available", True):
+            return 0.0
         if self.coordinator.data and self.coordinator.data.voltage_v is not None:
             return round(self.coordinator.data.voltage_v, 1)
-        return None
+        return 0.0 if getattr(self.coordinator, "keep_entities_available", True) else None
 
 
 class TomonsCurrentSensor(TomonsBaseSensor):
@@ -130,9 +135,11 @@ class TomonsCurrentSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[float]:
+        if not self.coordinator.is_online and getattr(self.coordinator, "keep_entities_available", True):
+            return 0.0
         if self.coordinator.data and self.coordinator.data.current_a is not None:
             return round(self.coordinator.data.current_a, 2)
-        return None
+        return 0.0 if getattr(self.coordinator, "keep_entities_available", True) else None
 
 
 class TomonsPowerSensor(TomonsBaseSensor):
@@ -149,9 +156,11 @@ class TomonsPowerSensor(TomonsBaseSensor):
 
     @property
     def native_value(self) -> Optional[int]:
+        if not self.coordinator.is_online and getattr(self.coordinator, "keep_entities_available", True):
+            return 0
         if self.coordinator.data and self.coordinator.data.power_w is not None:
             return int(self.coordinator.data.power_w)
-        return None
+        return 0 if getattr(self.coordinator, "keep_entities_available", True) else None
 
 
 class TomonsTotalEnergySensor(TomonsBaseSensor, RestoreEntity):

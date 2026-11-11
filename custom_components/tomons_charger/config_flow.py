@@ -18,6 +18,8 @@ from .const import (
     CONF_PRODUCT_MODEL,
     CONF_CHIP_MODEL,
     CONF_MAX_CURRENT_LIMIT,
+    CONF_KEEP_ENTITIES_AVAILABLE,
+    DEFAULT_KEEP_ENTITIES_AVAILABLE,
     CONF_BROKER,
     CONF_PORT,
     CONF_MQTT_USER,
@@ -180,6 +182,11 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
             default_limit,
         )
 
+        current_keep_available = self.config_entry.options.get(
+            CONF_KEEP_ENTITIES_AVAILABLE,
+            DEFAULT_KEEP_ENTITIES_AVAILABLE,
+        )
+
         options_schema = vol.Schema(
             {
                 vol.Required(
@@ -191,6 +198,10 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
                         32: "32 A (22 kW 3-phasig CEE rot / 7.4 kW)",
                     }
                 ),
+                vol.Required(
+                    CONF_KEEP_ENTITIES_AVAILABLE,
+                    default=bool(current_keep_available),
+                ): bool,
             }
         )
 

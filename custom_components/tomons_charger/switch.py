@@ -56,11 +56,17 @@ class TomonsChargingSwitch(CoordinatorEntity[TomonsDataUpdateCoordinator], Switc
     @property
     def available(self) -> bool:
         """Return True if switch is available."""
-        return super().available and self.coordinator.is_online
+        if not super().available:
+            return False
+        if getattr(self.coordinator, "keep_entities_available", True):
+            return True
+        return self.coordinator.is_online
 
     @property
     def is_on(self) -> bool:
         """Return True if Wallbox is actively delivering charging power."""
+        if not self.coordinator.is_online:
+            return False
         if not self.coordinator.data:
             return False
         status = self.coordinator.data.cable_status or ""

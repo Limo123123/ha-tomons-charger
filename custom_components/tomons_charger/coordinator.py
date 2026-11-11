@@ -23,7 +23,9 @@ from .const import (
     CONF_MAC,
     CONF_PRODUCT_MODEL,
     CONF_MAX_CURRENT_LIMIT,
+    CONF_KEEP_ENTITIES_AVAILABLE,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_KEEP_ENTITIES_AVAILABLE,
 )
 from .tomons_charger import TomonsCharger, TomonsCloudClient, ChargerTelemetry
 
@@ -50,6 +52,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self.model_code: str = str(entry.data.get(CONF_PRODUCT_MODEL, "5242896"))
         self.max_hardware_current_a: int = self._determine_max_hardware_current()
         self.current_limit_a: int = min(16, self.max_hardware_current_a)
+        self.keep_entities_available: bool = self.entry.options.get(
+            CONF_KEEP_ENTITIES_AVAILABLE,
+            DEFAULT_KEEP_ENTITIES_AVAILABLE,
+        )
 
         self.cloud: Optional[TomonsCloudClient] = None
         self.charger: Optional[TomonsCharger] = None
@@ -552,6 +558,7 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 telemetry.cable_status = "Offline"
                 telemetry.power_w = 0
                 telemetry.current_a = 0.0
+                telemetry.voltage_v = 0.0
             elif self._was_charging and (telemetry.power_w is None or telemetry.power_w <= 0) and self._last_charging_power > 0:
                 if telemetry.cable_status != "Nicht verbunden (Standby)":
                     telemetry.power_w = self._last_charging_power
@@ -561,6 +568,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             max_current_a=self.current_limit_a,
             total_energy_kwh=self.total_energy_kwh,
             is_online=self.is_online,
+            voltage_v=0.0 if not self.is_online else None,
+            current_a=0.0,
+            power_w=0,
             cable_status="Offline" if not self.is_online else "Nicht verbunden (Standby)",
         )
 
