@@ -390,7 +390,7 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 is_charging = False
                 power = 0
                 telemetry.power_w = 0
-            elif raw_is_charging:
+            elif raw_is_charging and power > 50:
                 # Normal active charging with power
                 self._consecutive_zero_power = 0
                 self._last_charging_power = power
@@ -560,8 +560,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 telemetry.current_a = 0.0
                 telemetry.voltage_v = 0.0
             elif self._was_charging and (telemetry.power_w is None or telemetry.power_w <= 0) and self._last_charging_power > 0:
-                if telemetry.cable_status != "Nicht verbunden (Standby)":
-                    telemetry.power_w = self._last_charging_power
+                telemetry.power_w = self._last_charging_power
+                if telemetry.current_a is None or telemetry.current_a <= 0:
+                    telemetry.current_a = getattr(self.data, "current_a", 0.0) if self.data else 0.0
+                telemetry.cable_status = "Lädt aktiv"
 
             return telemetry
         return ChargerTelemetry(

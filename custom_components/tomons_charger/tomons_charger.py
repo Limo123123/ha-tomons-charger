@@ -594,18 +594,26 @@ class InateckFragmentManager:
                     0x03: "Verbunden (Pausiert/Fertig)",
                     0x04: "Fehler",
                 }
-                if status_code in status_map:
-                    self.last_telemetry.cable_status = status_map[status_code]
-                    updated = True
+                # Do NOT let static status_code 0x00 from heartbeat packets overwrite active charging!
+                cur_power = self.last_telemetry.power_w or 0
+                cur_amps = self.last_telemetry.current_a or 0.0
+                is_currently_charging = (cur_power > 100 or cur_amps > 0.5 or self.last_telemetry.cable_status == "Lädt aktiv")
 
-                # When unplugged, force zero current and power
-                if status_code == 0x00:
-                    self.last_telemetry.current_a = 0.0
-                    self.last_telemetry.power_w = 0
+                if status_code == 0x00 and is_currently_charging:
+                    # Heartbeat / status packet contains static 0x00; do not drop active charging telemetry
+                    pass
+                else:
+                    if status_code in status_map:
+                        self.last_telemetry.cable_status = status_map[status_code]
+                        updated = True
 
-        # Physical override: ONLY when cable is NOT disconnected:
-        # If current (> 1.0 A) and power (> 200 W) are actively flowing, promote to "Lädt aktiv"
-        if (self.last_telemetry.current_a and self.last_telemetry.current_a > 1.0) and (self.last_telemetry.power_w and self.last_telemetry.power_w > 200):
+                    # Only force zero current/power if not currently charging
+                    if status_code == 0x00 and not is_currently_charging:
+                        self.last_telemetry.current_a = 0.0
+                        self.last_telemetry.power_w = 0
+
+        # Physical override: If current (> 0.5 A) or power (> 100 W) are actively flowing, promote to "Lädt aktiv"
+        if (self.last_telemetry.current_a and self.last_telemetry.current_a > 0.5) or (self.last_telemetry.power_w and self.last_telemetry.power_w > 100):
             self.last_telemetry.cable_status = "Lädt aktiv"
             updated = True
 
