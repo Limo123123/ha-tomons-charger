@@ -290,6 +290,13 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
 
     def restore_cumulative_energy(self, restored_kwh: float) -> None:
         """Restore cumulative energy from Home Assistant RestoreEntity."""
+        if restored_kwh > 200.0:
+            _LOGGER.warning(
+                "Ignoring restored cumulative energy from HA entity state (%.2f kWh): exceeds realistic limit (200 kWh)",
+                restored_kwh,
+            )
+            return
+
         if restored_kwh > self.cumulative_energy_kwh:
             _LOGGER.info(
                 "Restoring cumulative energy from HA entity state: %.2f kWh (was %.2f kWh)",
@@ -447,10 +454,6 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 self._consecutive_zero_power = 0
 
         hw_energy = getattr(telemetry, "hardware_session_energy_kwh", None)
-        hw_total = getattr(telemetry, "total_energy_kwh", None)
-        if hw_total is not None and hw_total > 0 and hw_total > self.cumulative_energy_kwh:
-            self.cumulative_energy_kwh = round(hw_total, 2)
-            self._save_energy_cache()
 
         if is_charging:
             if not self._was_charging:
