@@ -19,6 +19,7 @@ from .const import (
     CONF_CHIP_MODEL,
     CONF_MAX_CURRENT_LIMIT,
     CONF_KEEP_ENTITIES_AVAILABLE,
+    CONF_CUSTOM_TOTAL_ENERGY,
     DEFAULT_KEEP_ENTITIES_AVAILABLE,
     CONF_BROKER,
     CONF_PORT,
@@ -195,6 +196,7 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
 
         current_val = default_limit
         current_keep_available = DEFAULT_KEEP_ENTITIES_AVAILABLE
+        current_custom_total = None
         if entry and hasattr(entry, "options"):
             current_val = entry.options.get(
                 CONF_MAX_CURRENT_LIMIT,
@@ -204,24 +206,30 @@ class TomonsOptionsFlow(config_entries.OptionsFlow):
                 CONF_KEEP_ENTITIES_AVAILABLE,
                 DEFAULT_KEEP_ENTITIES_AVAILABLE,
             )
+            current_custom_total = entry.options.get(CONF_CUSTOM_TOTAL_ENERGY)
 
-        options_schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_MAX_CURRENT_LIMIT,
-                    default=int(current_val),
-                ): vol.In(
-                    {
-                        16: "16 A (11 kW 3-phasig CEE rot / 3.7 kW Schuko)",
-                        32: "32 A (22 kW 3-phasig CEE rot / 7.4 kW)",
-                    }
-                ),
-                vol.Required(
-                    CONF_KEEP_ENTITIES_AVAILABLE,
-                    default=bool(current_keep_available),
-                ): bool,
-            }
-        )
+        fields: Dict[Any, Any] = {
+            vol.Required(
+                CONF_MAX_CURRENT_LIMIT,
+                default=int(current_val),
+            ): vol.In(
+                {
+                    16: "16 A (11 kW 3-phasig CEE rot / 3.7 kW Schuko)",
+                    32: "32 A (22 kW 3-phasig CEE rot / 7.4 kW)",
+                }
+            ),
+            vol.Required(
+                CONF_KEEP_ENTITIES_AVAILABLE,
+                default=bool(current_keep_available),
+            ): bool,
+        }
+
+        if current_custom_total is not None:
+            fields[vol.Optional(CONF_CUSTOM_TOTAL_ENERGY, default=float(current_custom_total))] = vol.Coerce(float)
+        else:
+            fields[vol.Optional(CONF_CUSTOM_TOTAL_ENERGY)] = vol.Coerce(float)
+
+        options_schema = vol.Schema(fields)
 
         return self.async_show_form(
             step_id="init",

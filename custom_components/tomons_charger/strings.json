@@ -60,7 +60,8 @@
         "description": "Passe die Einstellungen für deine Wallbox an.",
         "data": {
           "max_current_limit": "Maximale Hardware-Stromgrenze (16 A oder 32 A)",
-          "keep_entities_available": "Entitäten auch bei Offline-Wallbox verfügbar halten (verhindert 'Unavailable' auf Dashboards)"
+          "keep_entities_available": "Entitäten auch bei Offline-Wallbox verfügbar halten (verhindert 'Unavailable' auf Dashboards)",
+          "custom_total_energy": "Gesamtenergie Zählerstand manuell korrigieren (kWh, z.B. 22.9)"
         }
       }
     }

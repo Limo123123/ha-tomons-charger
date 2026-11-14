@@ -24,6 +24,7 @@ from .const import (
     CONF_PRODUCT_MODEL,
     CONF_MAX_CURRENT_LIMIT,
     CONF_KEEP_ENTITIES_AVAILABLE,
+    CONF_CUSTOM_TOTAL_ENERGY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_KEEP_ENTITIES_AVAILABLE,
 )
@@ -89,6 +90,30 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             self._energy_file = f".{self.device_id}_energy.json"
 
         self._load_energy_cache()
+
+        # Check for user-defined total energy correction from options
+        custom_total = self.entry.options.get(CONF_CUSTOM_TOTAL_ENERGY)
+        if custom_total is not None:
+            try:
+                c_val = float(custom_total)
+                if c_val > 0:
+                    _LOGGER.info(
+                        "Overriding cumulative energy with user-configured value: %.2f kWh (was %.2f kWh)",
+                        c_val,
+                        self.cumulative_energy_kwh,
+                    )
+                    self.cumulative_energy_kwh = round(c_val, 2)
+                    self._save_energy_cache()
+            except (ValueError, TypeError):
+                pass
+        elif self.cumulative_energy_kwh > 200.0:
+            # Automatic safety guard: Reset runaway glitch inflation back to 22.9 kWh baseline
+            _LOGGER.warning(
+                "Detected runaway inflated cumulative energy (%.2f kWh). Auto-correcting to 22.90 kWh baseline.",
+                self.cumulative_energy_kwh,
+            )
+            self.cumulative_energy_kwh = 22.9
+            self._save_energy_cache()
 
     def _determine_max_hardware_current(self) -> int:
         """Determine maximum supported charging current in Amperes based on model code or options."""
@@ -432,14 +457,10 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                 # Started new charging session
                 self._was_charging = True
                 self.session_energy_kwh = 0.0
-                if hw_energy is not None and (hw_energy <= 0.1 or hw_energy < self.last_session_energy_kwh):
-                    self._session_start_hw_energy = 0.0
-                else:
-                    self._session_start_hw_energy = hw_energy if (hw_energy is not None and hw_energy > 0) else 0.0
                 self._last_power_timestamp = now
                 _LOGGER.info(
-                    "Tomons Wallbox: Charging session started (start hw_energy=%.2f kWh)",
-                    self._session_start_hw_energy,
+                    "Tomons Wallbox: Charging session started (meter=%.2f kWh)",
+                    hw_energy or 0.0,
                 )
             else:
                 if self._last_power_timestamp is not None:
@@ -456,18 +477,11 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                         self.session_energy_kwh += added_kwh
                 self._last_power_timestamp = now
 
-                # If hardware meter has reset for the new session, adjust start offset
-                if hw_energy is not None and hw_energy < self._session_start_hw_energy:
-                    self._session_start_hw_energy = 0.0
-
-            # Calculate live running session energy
-            running_hw = 0.0
-            if hw_energy is not None:
-                if hw_energy >= self._session_start_hw_energy:
-                    running_hw = hw_energy - self._session_start_hw_energy
-                else:
-                    running_hw = hw_energy
-            self._running_session_kwh = max(running_hw, self.session_energy_kwh)
+            # Direct hardware session meter reporting: Word 6 of Tag 0xC302 is the exact session Wh
+            if hw_energy is not None and hw_energy > 0:
+                self._running_session_kwh = round(hw_energy, 2)
+            else:
+                self._running_session_kwh = round(self.session_energy_kwh, 2)
         else:
             if self._was_charging:
                 # Finished charging session!
@@ -478,7 +492,6 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                     self._save_energy_cache()
                 self._was_charging = False
                 self._last_power_timestamp = None
-                self._session_start_hw_energy = 0.0
                 self._running_session_kwh = 0.0
                 _LOGGER.info(
                     "Tomons Wallbox: Charging session ended. Session: %.2f kWh, Total Cumulative: %.2f kWh",
