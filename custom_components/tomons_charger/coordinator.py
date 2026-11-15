@@ -68,6 +68,7 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
         self._running_session_kwh: float = 0.0
         self._last_power_timestamp: Optional[float] = None
         self._was_charging: bool = False
+        self._session_energy_added: bool = False
         self.is_online: bool = False
         self._last_telemetry_time: Optional[float] = None
 
@@ -106,13 +107,14 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
                     self._save_energy_cache()
             except (ValueError, TypeError):
                 pass
-        elif self.cumulative_energy_kwh > 200.0:
-            # Automatic safety guard: Reset runaway glitch inflation back to 22.9 kWh baseline
+        elif self.cumulative_energy_kwh > 100.0:
+            # Automatic safety guard: Reset runaway glitch inflation back to 57.87 kWh true total
             _LOGGER.warning(
-                "Detected runaway inflated cumulative energy (%.2f kWh). Auto-correcting to 22.90 kWh baseline.",
+                "Detected runaway inflated cumulative energy (%.2f kWh). Auto-correcting to 57.87 kWh true baseline.",
                 self.cumulative_energy_kwh,
             )
-            self.cumulative_energy_kwh = 22.9
+            self.cumulative_energy_kwh = 57.87
+            self.last_session_energy_kwh = 34.97
             self._save_energy_cache()
 
     def _determine_max_hardware_current(self) -> int:
@@ -290,9 +292,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
 
     def restore_cumulative_energy(self, restored_kwh: float) -> None:
         """Restore cumulative energy from Home Assistant RestoreEntity."""
-        if restored_kwh > 200.0:
+        if restored_kwh > 100.0:
             _LOGGER.warning(
-                "Ignoring restored cumulative energy from HA entity state (%.2f kWh): exceeds realistic limit (200 kWh)",
+                "Ignoring restored cumulative energy from HA entity state (%.2f kWh): exceeds realistic limit (100 kWh)",
                 restored_kwh,
             )
             return
@@ -459,7 +461,9 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             if not self._was_charging:
                 # Started new charging session
                 self._was_charging = True
+                self._session_energy_added = False
                 self.session_energy_kwh = 0.0
+                self._running_session_kwh = 0.0
                 self._last_power_timestamp = now
                 _LOGGER.info(
                     "Tomons Wallbox: Charging session started (meter=%.2f kWh)",
@@ -489,18 +493,20 @@ class TomonsDataUpdateCoordinator(DataUpdateCoordinator[ChargerTelemetry]):
             if self._was_charging:
                 # Finished charging session!
                 delivered_kwh = max(self._running_session_kwh, self.session_energy_kwh)
-                if delivered_kwh > 0:
+                if delivered_kwh > 0.05 and not self._session_energy_added:
                     self.last_session_energy_kwh = round(delivered_kwh, 2)
                     self.cumulative_energy_kwh = round(self.cumulative_energy_kwh + delivered_kwh, 2)
+                    self._session_energy_added = True
                     self._save_energy_cache()
+                    _LOGGER.info(
+                        "Tomons Wallbox: Charging session ended. Session: %.2f kWh, Total Cumulative: %.2f kWh",
+                        self.last_session_energy_kwh,
+                        self.cumulative_energy_kwh,
+                    )
                 self._was_charging = False
                 self._last_power_timestamp = None
                 self._running_session_kwh = 0.0
-                _LOGGER.info(
-                    "Tomons Wallbox: Charging session ended. Session: %.2f kWh, Total Cumulative: %.2f kWh",
-                    self.last_session_energy_kwh,
-                    self.cumulative_energy_kwh,
-                )
+                self.session_energy_kwh = 0.0
             else:
                 # Standby / Idle: seed cumulative_energy_kwh if 0 and hardware reports last session
                 if self.cumulative_energy_kwh == 0.0 and hw_energy is not None and hw_energy > 0:
